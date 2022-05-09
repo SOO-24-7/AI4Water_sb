@@ -410,13 +410,19 @@ class BaseModel(NN):
 
     @property
     def is_binary(self):
+
+        if 'is_binary' in self.config:
+            return self.config['is_binary']
         if hasattr(self, 'dh_'):
             return self.dh_.is_binary
         raise NotImplementedError
 
+
     @property
     def is_multiclass(self)->bool:
         if self.mode == "classification":
+            if 'is_multiclass' in self.config:
+                return self.config['is_multiclass']
             if hasattr(self, 'dh_'):
                 return self.dh_.is_multiclass
             if len(self.classes_)>2:
@@ -633,10 +639,12 @@ class BaseModel(NN):
 
     def get_val_data(self, validation_data=None):
         """Finds out if there is validation_data"""
+        user_defined = True
         if validation_data is None:
             # when validation data is not given in kwargs and validation_data method is overwritten
             try:
                 validation_data = self.validation_data()
+                user_defined = False
             # when x,y is user defined then validation_data() can give this error
             except DataNotFound:
                 validation_data = None
@@ -649,7 +657,7 @@ class BaseModel(NN):
             elif hasattr(x, '__len__') and len(x)==0:
                 return None
             else:  # x,y is numpy array
-                if self.is_binary:
+                if not user_defined and self.is_binary:
                     if y.shape[1] > self.output_shape[1]:
                         y = np.argmax(y, 1).reshape(-1,1)
 
