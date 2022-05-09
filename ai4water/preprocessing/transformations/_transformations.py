@@ -91,8 +91,9 @@ class PowerTransformer(SKPowerTransformer, ScalerWithConfig):
     the user to define `lambdas` parameter for each input feature. The default
     behaviour of this transformer is same as that of scikit-learn's.
     """
+
     def __init__(self, method='yeo-johnson', *, standardize=True, copy=True,
-                 lambdas=None):
+                 lambdas=None, pre_standardize=False):
         """
         lambdas: float or 1d array like for each feature. If not given, it is
             calculated from scipy.stats.boxcox(X, lmbda=None). Only available
@@ -102,19 +103,26 @@ class PowerTransformer(SKPowerTransformer, ScalerWithConfig):
         .. documentation:
             https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.PowerTransformer.html
         """
+
+        """ 
+            22.05.03 added "pre_standardize"
+            to fix "PowerTransformer 'divide by zero encountered in log'"
+            source: https://github.com/scikit-learn/scikit-learn/issues/14959#issuecomment-602090088
+
+            """
+
         if lambdas is not None:
             if isinstance(lambdas, float):
                 lambdas = np.array([lambdas])
             lambdas = np.array(lambdas)
-            # if given, lambdas must be a 1d array
+            # if given lambdas must be a 1d array
             assert lambdas.size == len(lambdas)
-            lambdas = lambdas.reshape(-1,)
-            assert method != "yeo-johnson"
+            lambdas = lambdas.reshape(-1, )
 
         self.lambdas = lambdas
+        self.pre_standardize = pre_standardize
 
-        super(PowerTransformer, self).__init__(method=method,
-                                               standardize=standardize,
+        super(PowerTransformer, self).__init__(method=method, standardize=standardize,
                                                copy=copy)
 
     @property
@@ -155,6 +163,16 @@ class PowerTransformer(SKPowerTransformer, ScalerWithConfig):
         if not self.copy and not force_transform:  # if call from fit()
             X = X.copy()  # force copy so that fit does not change X inplace
 
+        setattr(self, 'scaler_to_standardize_', None)
+        if self.pre_standardize:  # 22.05.03 added
+            self._scaler = StandardScaler(copy=False, with_std=False)
+            if force_transform:
+                X = self._scaler.fit_transform(X)
+            else:
+                self._scaler.fit(X)
+
+            setattr(self, 'scaler_to_standardize_', self._scaler.config())
+
         optim_function = {'box-cox': self._box_cox_optimize,
                           'yeo-johnson': self._yeo_johnson_optimize
                           }[self.method]
@@ -172,15 +190,16 @@ class PowerTransformer(SKPowerTransformer, ScalerWithConfig):
                 with np.errstate(invalid='ignore'):  # hide NaN warnings
                     X[:, i] = transform_function(X[:, i], lmbda)
 
-        setattr(self, 'scaler_to_standardize_', None)
-        if self.standardize:
-            self._scaler = StandardScaler(copy=False)
-            if force_transform:
-                X = self._scaler.fit_transform(X)
-            else:
-                self._scaler.fit(X)
+        if not self.pre_standardize:
+            setattr(self, 'scaler_to_standardize_', None)
+            if self.standardize:
+                self._scaler = StandardScaler(copy=False)
+                if force_transform:
+                    X = self._scaler.fit_transform(X)
+                else:
+                    self._scaler.fit(X)
 
-            setattr(self, 'scaler_to_standardize_', self._scaler.config())
+                setattr(self, 'scaler_to_standardize_', self._scaler.config())
 
         return X
 
