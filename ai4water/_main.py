@@ -17,7 +17,7 @@ except ImportError:
 from .nn_tools import NN
 from .backend import sklearn_models
 from .utils.utils import make_model
-from .postprocessing import ProcessResults
+from .postprocessing import ProcessPredictions
 from .preprocessing.transformations import Transformations
 from .utils.utils import maybe_three_outputs, get_version_info
 from .models.tensorflow.custom_training import train_step, test_step
@@ -449,7 +449,7 @@ class BaseModel(NN):
             if self.dh_.data is None:
                 return None
             return self.dh_.is_multilabel
-        raise NotImplementedError
+        return None
 
     def _get_dummy_input_shape(self):
         raise NotImplementedError
@@ -1021,7 +1021,8 @@ class BaseModel(NN):
                  callbacks=None,
                  **kwargs):
 
-        visualizer = ProcessResults(path=self.path)
+        visualizer = ProcessPredictions(path=self.path, mode=self.mode,
+                                        show=bool(self.verbosity))
         self.is_training = True
 
         source = 'training'
@@ -1069,7 +1070,7 @@ class BaseModel(NN):
             history = self._fit(inputs, outputs, callbacks=callbacks, **kwargs)
 
             if self.verbosity >= 0:
-                visualizer.plot_loss(history.history, show=self.verbosity)
+                visualizer.plot_loss(history.history)
 
             self.load_best_weights()
         else:
@@ -1752,14 +1753,17 @@ class BaseModel(NN):
                                  **kwargs
                                  )
 
-    def call_predict(self,
-                     x=None,
-                     y=None,
-                     data='test',
-                     process_results=True,
-                     metrics="minimal",
-                     return_true: bool = False,
-                     **kwargs):
+    def call_predict(
+            self,
+            x=None,
+            y=None,
+            data='test',
+            process_results=True,
+            metrics="minimal",
+            return_true: bool = False,
+            plots=None,
+            **kwargs
+    ):
 
         source = 'test'
         if isinstance(data, str) and data in ['training', 'validation', 'test']:
@@ -1846,13 +1850,15 @@ class BaseModel(NN):
             process_results = False
 
         # initialize post-processes
-        pp = ProcessResults(
+        pp = ProcessPredictions(
+            mode = self.mode,
             path=self.path,
             forecast_len=self.forecast_len,
             output_features=self.output_features,
             is_multiclass=self.is_multiclass,
-            verbosity=self.verbosity,
-            config=self.config
+            is_multilabel=self.is_multilabel,
+            plots=plots,
+            show=bool(self.verbosity),
         )
 
         if self.quantiles is None:
@@ -1864,25 +1870,12 @@ class BaseModel(NN):
             if process_results: # if mode has not been inferred yet, try to infer it
                 if self.mode is None:  # because metrics cannot be calculated with wrong mode
                     if len(self.classes_) == 0:
-                        self.config['mode'] = "regression"
+                        pp.mode = "regression"
 
-                if self.mode == 'regression':
-                    pp.process_rgr_results(true_outputs,
-                                                predicted,
-                                                metrics=metrics,
-                                                prefix=prefix + '_',
-                                                index=dt_index,
-                                                user_defined_data=user_defined_data)
-                else:
-                    pp.process_cls_results(true_outputs,
-                                               predicted,
-                                               metrics=metrics,
-                                               prefix=prefix,
-                                               index=dt_index,
-                                               user_defined_data=user_defined_data)
+                pp(true_outputs, predicted, metrics, prefix, dt_index,  inputs)
+                if self.mode == 'classification':
 
                     if self.category == 'ML':  # todo, also plot for DL
-                        pp.confusion_matrx(true_outputs, predicted)
                         # if model does not have predict_proba method, we can't plot following
                         if hasattr(self._model, 'predict_proba'):
                             # if data is user defined, we don't know whether it is binary or not

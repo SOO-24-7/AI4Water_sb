@@ -9,7 +9,7 @@ from ai4water.backend import tf, os, np, pd, plt, easy_mpl
 from ai4water.hyperopt import HyperOpt
 from ai4water.preprocessing import DataSet
 from ai4water.utils.utils import jsonize, ERROR_LABELS
-from ai4water.postprocessing import ProcessResults 
+from ai4water.postprocessing import ProcessPredictions
 from ai4water.utils.utils import clear_weights, dateandtime_now, dict_to_file
 
 plot = easy_mpl.plot
@@ -1116,13 +1116,11 @@ Available cases are {self.models} and you wanted to include
         """
         Fits the tpot_'s fit  method which
         finds out the best pipline for the given data.
-
         Arguments
         ---------
             data :
             models :
                 It can be of three types.
-
                 - If list, it will be the names of machine learning models/
                     algorithms to consider.
                 - If integer, it will be the number of top
@@ -1140,7 +1138,6 @@ Available cases are {self.models} and you wanted to include
                 - You can also set it to ``all`` consider all models available in
                     ai4water's Experiment module.
                 - default is None, which means, the `tpot_config` argument will be None
-
             selection_criteria :
                 The name of performance metric. If ``models`` is integer, then
                 according to this performance metric the models will be choosen.
@@ -1150,11 +1147,9 @@ Available cases are {self.models} and you wanted to include
             tpot_args :
                 any keyword argument for tpot's Regressor_ or Classifier_ class.
                 This can include arguments like ``generations``, ``population_size`` etc.
-
         Returns
         -------
             the tpot object
-
         Example
         -------
             >>> from ai4water.experiments import MLRegressionExperiments
@@ -1162,13 +1157,10 @@ Available cases are {self.models} and you wanted to include
             >>> exp = MLRegressionExperiments(exp_name=f"tpot_reg_{dateandtime_now()}")
             >>> exp.fit(data=busan_beach())
             >>> tpot_regr = exp.fit_with_tpot(busan_beach(), 2, generations=1, population_size=2)
-
         .. _tpot:
             http://epistasislab.github.io/tpot/
-
         .. _Regressor:
             http://epistasislab.github.io/tpot/api/#regression
-
         .. _Classifier:
             http://epistasislab.github.io/tpot/api/#classification
         """
@@ -1185,7 +1177,7 @@ Available cases are {self.models} and you wanted to include
 
         if isinstance(models, int):
 
-            assert len(self.metrics)>1, f"""
+            assert len(self.metrics) > 1, f"""
             you must first run .fit() method in order to choose top {models} models"""
 
             # sort the models w.r.t their performance
@@ -1231,7 +1223,7 @@ Available cases are {self.models} and you wanted to include
             json.dump(jsonize(tpot_config), fp, indent=True)
 
         tpot = tpot_caller(
-            verbosity=self.verbosity+1,
+            verbosity=self.verbosity + 1,
             scoring=scoring,
             config_dict=tpot_config,
             **tpot_args
@@ -1248,22 +1240,24 @@ Available cases are {self.models} and you wanted to include
         train_x, train_y = dh.training_data()
         tpot.fit(train_x, train_y.reshape(-1, 1))
 
-        visualizer = ProcessResults(path=self.exp_path)
+        if "regressor" in self.tpot_estimator:
+            mode = "regression"
+        else:
+            mode = "classification"
+        visualizer = ProcessPredictions(path=self.exp_path,
+                                        show=bool(self.verbosity),
+                                        mode=mode)
 
         for idx, data_name in enumerate(['training', 'test']):
-
             x_data, y_data = getattr(dh, f"{data_name}_data")(key=str(idx))
 
             pred = tpot.fitted_pipeline_.predict(x_data)
             r2 = RegressionMetrics(y_data, pred).r2()
 
             # todo, perform inverse transform and deindexification
-            visualizer.plot_results(
-                pd.DataFrame(y_data.reshape(-1,)),
-                pd.DataFrame(pred.reshape(-1,)),
-                annotation_key='$R^2$', annotation_val=r2,
-                show=self.verbosity,
-                where='',  name=data_name
+            visualizer(
+                pd.DataFrame(y_data.reshape(-1, )),
+                pd.DataFrame(pred.reshape(-1, )),
             )
         # save the python code of fitted pipeline
         tpot.export(os.path.join(self.exp_path, "tpot_fitted_pipeline.py"))
